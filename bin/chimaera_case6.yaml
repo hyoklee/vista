@@ -1,0 +1,71 @@
+# chimaera_case6.yaml — clio-core / IOWarp CTE runtime config for MiV case-6
+# on TACC Vista (single-node, RAM/DRAM storage tier).
+#
+# Consumed by `clio_run runtime start` via $CLIO_SERVER_CONF (set in
+# clio_env.sh). On start the runtime auto-composes every pool listed under
+# `compose:` (unless started with --ephemeral), so no separate
+# `clio_run compose` step is required.
+#
+# Data path for the POSIX LD_PRELOAD adapter (libclio_cte_posix.so):
+#   open("clio::/real/path")  ->  clio_cte_filesystem (pool 560.0)
+#                             ->  clio_cte_core        (pool 512.0)
+#                             ->  RAM bdev tier (ram::cte_ram_tier1)
+# Only paths carrying the literal "clio::" marker are intercepted; every
+# other path falls through to the real libc. Pool ids 512.0 / 560.0 are the
+# canonical constants the adapter hard-codes (kCtePoolId / kCfsPoolId).
+
+# -- Shared-memory budget (single mmap'd arena shared by runtime + clients) ---
+memory:
+  main_segment_size: "8GB"
+  client_data_segment_size: "2GB"
+  runtime_data_segment_size: "2GB"
+
+# -- Networking (single node: shared-memory IPC; port only used if distributed)
+networking:
+  port: 9413
+  neighborhood_size: 32
+
+# -- Runtime workers ----------------------------------------------------------
+runtime:
+  num_threads: 8
+  queue_depth: 1024
+  first_busy_wait: 10000
+  max_sleep: 50000
+
+# -- Pools composed automatically on `clio_run runtime start` ------------------
+compose:
+  # (1) DRAM block device — provides the shared-memory allocator the other
+  #     modules build on. Required.
+  - mod_name: clio_bdev
+    pool_name: "ram::chi_default_bdev"
+    pool_query: local
+    pool_id: "301.0"
+    bdev_type: ram
+    capacity: "0g"                 # 0g => 80% of node DRAM
+
+  # (2) CTE core at the canonical entrypoint 512.0 (kCtePoolId) with a RAM tier.
+  - mod_name: clio_cte_core
+    pool_name: cte_main
+    pool_query: local
+    pool_id: "512.0"
+    storage:
+      - path: "ram::cte_ram_tier1"
+        bdev_type: "ram"
+        capacity_limit: "0g"       # 0g => 80% of node DRAM
+        score: 1.0
+    dpe:
+      dpe_type: "max_bw"
+    targets:
+      neighborhood: 1              # single-node
+      default_target_timeout_ms: 30000
+      poll_period_ms: 5000
+
+  # (3) Context filesystem chimod at 560.0 (kCfsPoolId) over CTE core (512.0).
+  #     The POSIX/STDIO/MPI-IO adapters bind to this pool. Must come AFTER the
+  #     CTE core entry. Adapters create-or-bind idempotently, so composing it
+  #     here is safe.
+  - mod_name: clio_cte_filesystem
+    pool_name: clio_cte_filesystem
+    pool_query: local
+    pool_id: "560.0"
+    next_pool_id: "512.0"

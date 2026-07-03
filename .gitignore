@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Build tree (venv + clio-core build, multi-GB — do not track)
+build/
+
+# Compiled clio CTE round-trip test binary (keep the .c source)
+bin/cte_roundtrip_test
