@@ -1,0 +1,71 @@
+# chimaera_case6_2node.yaml — clio-core / IOWarp CTE runtime config for a
+# 2-NODE distributed cluster on TACC Vista over InfiniBand (ib0 / IPoIB).
+#
+# Consumed by `clio_run runtime start` via $CLIO_SERVER_CONF. One daemon is
+# launched per node (srun --ntasks-per-node=1 --nodes=2); each daemon reads
+# THIS file plus the shared hostfile named by $CLIO_HOSTFILE.
+#
+# Peer discovery: networking.hostfile lists one host per line; node_id is the
+# line offset (line 0 => node 0 = leader). Each daemon self-identifies by
+# matching a hostfile entry against its own local interface IPs, so the
+# hostfile must contain the two nodes' ib0 IPs (192.168.20.x). Each daemon
+# then binds its cross-node ZeroMQ ROUTER to its own ib0 IP -> all inter-node
+# traffic rides InfiniBand. (The local client<->runtime channel is always
+# 127.0.0.1:port+1 and is unrelated to the cluster fabric.)
+#
+# The compose section is applied on EVERY node, so the RAM tier is created
+# per-node (one clio_cte_core RAM bdev on each of the 2 nodes).
+
+# -- Shared-memory budget (per node) ------------------------------------------
+memory:
+  main_segment_size: "8GB"
+  client_data_segment_size: "2GB"
+  runtime_data_segment_size: "2GB"
+
+# -- Networking / cluster -----------------------------------------------------
+networking:
+  port: 9413
+  neighborhood_size: 2                 # this cluster has 2 nodes
+  # Hostfile of ib0 IPs, one per line, generated per-allocation by the launch
+  # script. ${CLIO_HOSTFILE} is expanded by CTP's ExpandPath at load time.
+  hostfile: "${CLIO_HOSTFILE}"
+  wait_for_restart: 60                 # seconds each daemon waits for its peer
+  wait_for_restart_poll_period: 1
+
+# -- Runtime workers ----------------------------------------------------------
+runtime:
+  num_threads: 8
+  queue_depth: 1024
+  first_busy_wait: 10000
+  max_sleep: 50000
+
+# -- Pools composed automatically on `clio_run runtime start` (per node) -------
+compose:
+  - mod_name: clio_bdev
+    pool_name: "ram::chi_default_bdev"
+    pool_query: local
+    pool_id: "301.0"
+    bdev_type: ram
+    capacity: "0g"                     # 0g => 80% of node DRAM
+
+  - mod_name: clio_cte_core
+    pool_name: cte_main
+    pool_query: local
+    pool_id: "512.0"
+    storage:
+      - path: "ram::cte_ram_tier1"
+        bdev_type: "ram"
+        capacity_limit: "0g"           # per-node DRAM tier
+        score: 1.0
+    dpe:
+      dpe_type: "max_bw"
+    targets:
+      neighborhood: 2                  # CTE may buffer across both nodes
+      default_target_timeout_ms: 30000
+      poll_period_ms: 5000
+
+  - mod_name: clio_cte_filesystem
+    pool_name: clio_cte_filesystem
+    pool_query: local
+    pool_id: "560.0"
+    next_pool_id: "512.0"

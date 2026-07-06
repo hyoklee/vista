@@ -54,17 +54,30 @@ echo "=== MiV case 6 : nodes=$NODES ranks=$NRANKS tstop=$TSTOP dt=$DT IOWARP=$IO
 ls -la datasets/Microcircuit_Small/ 2>&1 | head
 
 # --- optional: start clio-core CTE runtime + set LD_PRELOAD ------------------
+# For >1 node use the distributed (InfiniBand ib0) 2-node cluster env; for 1
+# node use the shared-memory single-node env. Both define CLIO_POSIX_LIB,
+# CLIO_RUNTIME_START, CLIO_RUNTIME_STOP.
+MPI_XFLAGS=()
 PRELOAD=""
 if [ "$IOWARP" = "1" ]; then
-    # Filled in from the Vista clio-core build (bin/clio_env.sh defines
-    # CLIO_POSIX_LIB, CLIO_RUNTIME_START, CLIO_RUNTIME_STOP, CHIMAERA_CONF).
-    if [ -f /work/11623/hyoklee/vista/bin/clio_env.sh ]; then
-        source /work/11623/hyoklee/vista/bin/clio_env.sh
-        echo "clio POSIX lib: $CLIO_POSIX_LIB"
-        [ -n "$CLIO_RUNTIME_START" ] && eval "$CLIO_RUNTIME_START"
-        PRELOAD="LD_PRELOAD=$CLIO_POSIX_LIB"
+    if [ "$NODES" -gt 1 ]; then
+        CLIO_ENV=/work/11623/hyoklee/vista/bin/clio_env_2node.sh
     else
-        echo "ERROR: IOWARP=1 but bin/clio_env.sh not present" >&2; exit 2
+        CLIO_ENV=/work/11623/hyoklee/vista/bin/clio_env.sh
+    fi
+    if [ -f "$CLIO_ENV" ]; then
+        source "$CLIO_ENV"
+        echo "clio env: $CLIO_ENV  POSIX lib: $CLIO_POSIX_LIB"
+        [ -n "$CLIO_RUNTIME_START" ] && eval "$CLIO_RUNTIME_START"
+        # Preload the interceptor on EVERY rank (incl. remote nodes): export it
+        # and forward it (+ lib path + clio config) to remote ranks via mpirun -x.
+        export LD_PRELOAD="$CLIO_POSIX_LIB"
+        for v in LD_PRELOAD LD_LIBRARY_PATH CLIO_SERVER_CONF CLIO_REPO_PATH \
+                 CLIO_HOSTFILE CLIO_IPC_MODE CHIMAERA_CONF; do
+            [ -n "${!v}" ] && MPI_XFLAGS+=(-x "$v")
+        done
+    else
+        echo "ERROR: IOWARP=1 but $CLIO_ENV not present" >&2; exit 2
     fi
 fi
 
@@ -73,7 +86,7 @@ LABEL=$([ "$IOWARP" = "1" ] && echo iowarp || echo baseline)
 LOG=$RESULTS/run_${LABEL}_N${NODES}_r${NRANKS}_t${TSTOP}_${SLURM_JOB_ID}.log
 
 t0=$(date +%s.%N)
-env $PRELOAD mpirun -n "$NRANKS" run-network --verbose \
+mpirun "${MPI_XFLAGS[@]}" -n "$NRANKS" run-network --verbose \
     --config-file=Microcircuit_Small.yaml \
     --config-prefix=config \
     --arena-id=A --stimulus-id=Diag \

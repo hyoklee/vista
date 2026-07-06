@@ -77,6 +77,38 @@ Vista scales **cleanly 1→2→4 nodes** (contrast: earlier Aurora runs regresse
 (~30 `.mod` files) compile once into the run dir on the cold run; warm reps
 settle at ~69 s. Phase times are unaffected (compilation precedes them).
 
+## Result 3 — 2-node distributed CTE cluster over InfiniBand vs native HDF5/MPI
+
+A **2-node clio-core CTE cluster** was formed over Vista's fastest interconnect —
+**InfiniBand** (`ib0`, device `mlx5_0`; the only non-loopback interface, IPoIB
+`192.168.20.0/21`). The chimaera runtime bootstraps from an `ib0` hostfile
+(node_id = line offset); one daemon per node is launched via
+`srun --overlap --ntasks-per-node=1`, each binding its ZeroMQ ROUTER to its own
+ib0 IP. Verified from the daemon logs during the MiV run (job 810961): node 0 at
+`192.168.20.15:9413`, node 1 at `192.168.20.16:9413`, **bidirectional peer
+connections over ib0**, `neighborhood=2` on both nodes. MiV ran across both nodes
+under `LD_PRELOAD=libclio_cte_posix.so` (forwarded to remote ranks via
+`mpirun -x`). Means over 3 replicates each (2 nodes, 8 ranks, tstop=50):
+
+| Phase | Native HDF5 (MPI) | clio-core CTE (IB) | Δ |
+|-------|------------------:|-------------------:|----:|
+| created cells | 1.77 s | 1.68 s | −4.7% |
+| connected cells | 26.45 s | 26.34 s | −0.4% |
+| ran simulation | 9.24 s | 9.36 s | +1.3% |
+
+**CTE ≈ native within run-to-run noise**, and — notably — **all 3 clio reps
+completed with no deadlock** (rc=0), unlike the multi-node chimaera hangs seen in
+the earlier Aurora/ares PBS runs. The distributed CTE runtime over IB neither
+helps nor hurts case 6 for the same two reasons as the 1-node result: the
+workload is compute-bound, and neuroh5's dataset reads use MPI-IO (bypassing the
+POSIX interceptor). The CTE cluster's cross-node **shared-file** path is
+additionally a no-op here — this `dev` build's CFS tag namespace is node-local
+(`filesystem_runtime.cc` uses `PoolQuery::Local()`), so a `clio::` file written on
+one node is not visible on the other; irrelevant for MiV (unprefixed MPI-IO
+paths) but noted. Config `bin/chimaera_case6_2node.yaml`; launch
+`bin/clio_env_2node.sh` + `clio_2node_{start,stop}.sh`. Jobs 810946/810960/810962
+(native), 810947/810961/810963 (CTE).
+
 ## Patches (branch `vista-arm-fix` in MiV-Simulator; none needed in clio-core/neuroh5)
 
 1. **`f2e6c7d`** ignore benign FP underflow — `np.seterr(all="raise")` turned
