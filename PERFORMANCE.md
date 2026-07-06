@@ -6,7 +6,15 @@ on the TACC **Vista** supercomputer (NVIDIA Grace, ARM aarch64), comparing the
 **native parallel HDF5**. CPU-only (`gg` partition, Grace-Grace, 144 cores/node);
 no GPUs, per the task.
 
-Date: 2026-07-02 · Allocation: `IBN22011` · Driver scripts: `bin/` in this repo.
+Date: 2026-07-02 (updated 2026-07-06) · Allocation: `IBN22011` · Driver scripts: `bin/` in this repo.
+
+> **Update 2026-07-06:** clio-core rebuilt from latest `dev` (`f9e7273d`, ~55
+> commits newer than the initial build). Builds on Vista/ARM with ELF=ON +
+> sysroot glibc-2.34 after reverting a `context-transport-primitives` thread/lock
+> (cvrwlock/rwlock) + `unordered_map_ll` refactor that doesn't compile on aarch64
+> (branch `vista-arm-build`, commit `f12bbbfd`). Case 6 re-verified 1- and 2-node,
+> native + CTE: all rc=0, 2-node cluster forms over ib0, **CTE ≈ native within
+> noise — no regression** (1n connected 46.4 vs 46.8 s; 2n connected 27.7 vs 28.0 s).
 
 ## Software stack (all built from source, natively on aarch64)
 
