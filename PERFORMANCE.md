@@ -9,12 +9,15 @@ no GPUs, per the task.
 Date: 2026-07-02 (updated 2026-07-06) · Allocation: `IBN22011` · Driver scripts: `bin/` in this repo.
 
 > **Update 2026-07-06:** clio-core rebuilt from latest `dev` (`f9e7273d`, ~55
-> commits newer than the initial build). Builds on Vista/ARM with ELF=ON +
-> sysroot glibc-2.34 after reverting a `context-transport-primitives` thread/lock
-> (cvrwlock/rwlock) + `unordered_map_ll` refactor that doesn't compile on aarch64
-> (branch `vista-arm-build`, commit `f12bbbfd`). Case 6 re-verified 1- and 2-node,
-> native + CTE: all rc=0, 2-node cluster forms over ib0, **CTE ≈ native within
-> noise — no regression** (1n connected 46.4 vs 46.8 s; 2n connected 27.7 vs 28.0 s).
+> commits newer than the initial build). It **builds cleanly on Vista/ARM as-is**
+> (ELF=ON + sysroot glibc-2.34; a full build recompiled all affected
+> `context-transport-primitives` thread/lock + `unordered_map_ll` translation
+> units with 0 errors). An earlier apparent aarch64 build failure was a **stale
+> build-tree artifact** (the Jul-2 tree was configured for the old commit); a
+> clean reconfigure builds pristine dev with **no source patches** — so nothing
+> needed to be reported upstream. Case 6 re-verified 1- and 2-node, native + CTE:
+> all rc=0, 2-node cluster forms over ib0, **CTE ≈ native within noise — no
+> regression** (1n connected 46.4 vs 46.8 s; 2n connected 27.7 vs 28.0 s).
 
 ## Software stack (all built from source, natively on aarch64)
 
