@@ -29,10 +29,13 @@ fi
 #    co-schedule on the same nodes. --label prefixes each line with the task id.
 # LD_PRELOAD=$CLIO_PRELOAD forces this build's clio libs (consistent ABI across
 # daemon+client+interceptor) — else the conda-installed iowarp-core is mixed in
-# and the client SIGSEGVs (#697).
+# and daemon/client ABIs disagree (daemon aborts, client SIGSEGVs — #697).
+# NB: set LD_PRELOAD INSIDE the task shell, not via `--export=ALL,LD_PRELOAD=...`
+# — CLIO_PRELOAD contains spaces (multiple .so paths) which breaks --export parsing.
 srun --overlap --ntasks-per-node=1 --nodes="$NN" --kill-on-bad-exit=0 --label \
-     --export=ALL,LD_PRELOAD="${CLIO_PRELOAD:-}" \
-     "$CLIO_BIN/clio_run" runtime start > "$CLIO_RUNTIME_LOG" 2>&1 &
+     --export=ALL \
+     bash -c "export LD_PRELOAD='${CLIO_PRELOAD:-}'; exec '$CLIO_BIN/clio_run' runtime start" \
+     > "$CLIO_RUNTIME_LOG" 2>&1 &
 echo $! > "$CLIO_PIDFILE"
 echo "[2node-start] daemon srun pid=$(cat "$CLIO_PIDFILE"), log=$CLIO_RUNTIME_LOG"
 
