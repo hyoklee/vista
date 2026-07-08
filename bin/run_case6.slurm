@@ -71,7 +71,10 @@ if [ "$IOWARP" = "1" ]; then
         [ -n "$CLIO_RUNTIME_START" ] && eval "$CLIO_RUNTIME_START"
         # Preload the interceptor on EVERY rank (incl. remote nodes): export it
         # and forward it (+ lib path + clio config) to remote ranks via mpirun -x.
-        export LD_PRELOAD="$CLIO_POSIX_LIB"
+        # CLIO_PRELOAD (this build's clio libs) MUST come first so the whole
+        # process uses one consistent clio-core ABI — else the conda-installed
+        # iowarp-core is mixed in and the client SIGSEGVs (#697).
+        export LD_PRELOAD="${CLIO_PRELOAD:-}$CLIO_POSIX_LIB"
         for v in LD_PRELOAD LD_LIBRARY_PATH CLIO_SERVER_CONF CLIO_REPO_PATH \
                  CLIO_HOSTFILE CLIO_IPC_MODE CHIMAERA_CONF; do
             [ -n "${!v}" ] && MPI_XFLAGS+=(-x "$v")

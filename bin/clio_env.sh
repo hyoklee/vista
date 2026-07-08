@@ -42,6 +42,27 @@ export CLIO_REPO_PATH="$CLIO_BIN"
 # preload lib needs) is preferred over the older system one.
 export LD_LIBRARY_PATH="$CLIO_BIN:$CLIO_CONDA_ENV/lib:${LD_LIBRARY_PATH:-}"
 
+# --- CRITICAL: single consistent clio-core build (fixes #697 crash) ----------
+# The `iowarp` conda env also ships a full iowarp-core (libclio_*.so) built from
+# an OLDER commit. The build-tree libs carry an RPATH into the conda prefix, so
+# despite LD_LIBRARY_PATH the loader picks conda's libclio_run_cxx / client libs
+# — while the interceptor carries this build's inlined header code. Mixing two
+# builds gives a mismatched IpcManager ABI: the client reads zmq_transport_ at
+# the wrong offset -> spurious null -> SIGSEGV in ctp::lbm::Transport::Send
+# (issue #697). Force EVERY clio component (daemon + client + interceptor) onto
+# THIS build's libs by preloading them. CLIO_PRELOAD must be prepended to
+# LD_PRELOAD for both `clio_run` and the application.
+CLIO_PRELOAD=""
+for _l in libclio_run_cxx.so.1 libclio_ctp_host.so \
+          libclio_admin_client.so libclio_admin_runtime.so \
+          libclio_bdev_client.so libclio_bdev_runtime.so \
+          libclio_cte_core_client.so libclio_cte_core_runtime.so \
+          libclio_cte_filesystem_client.so libclio_cte_filesystem_runtime.so \
+          libclio_cae_core_client.so libclio_cae_core_runtime.so; do
+    [ -e "$CLIO_BIN/$_l" ] && CLIO_PRELOAD="$CLIO_PRELOAD$CLIO_BIN/$_l "
+done
+export CLIO_PRELOAD
+
 # clio_run daemon logging / bookkeeping (per-job under $SCRATCH).
 export CLIO_RUNTIME_LOG="${CLIO_RUNTIME_LOG:-/scratch/11623/hyoklee/miv/logs/clio_runtime_${SLURM_JOB_ID:-local}.log}"
 export CLIO_PIDFILE="${CLIO_PIDFILE:-/scratch/11623/hyoklee/miv/logs/clio_runtime_${SLURM_JOB_ID:-local}.pid}"
@@ -52,7 +73,7 @@ export CLIO_PIDFILE="${CLIO_PIDFILE:-/scratch/11623/hyoklee/miv/logs/clio_runtim
 # For >1 node you would launch one daemon per node (e.g. `srun --ntasks-per-node=1
 # $CLIO_BIN/clio_run runtime start`) — but multi-node chimaera has shown
 # deadlocks in prior runs, so single-node is the supported path here.
-export CLIO_RUNTIME_START="mkdir -p \"\$(dirname \"\$CLIO_RUNTIME_LOG\")\"; \"$CLIO_BIN/clio_run\" runtime start > \"\$CLIO_RUNTIME_LOG\" 2>&1 & echo \$! > \"\$CLIO_PIDFILE\"; sleep 8"
+export CLIO_RUNTIME_START="mkdir -p \"\$(dirname \"\$CLIO_RUNTIME_LOG\")\"; LD_PRELOAD=\"\$CLIO_PRELOAD\" \"$CLIO_BIN/clio_run\" runtime start > \"\$CLIO_RUNTIME_LOG\" 2>&1 & echo \$! > \"\$CLIO_PIDFILE\"; sleep 8"
 
 # STOP: ask the runtime to stop cleanly, then hard-kill any stragglers and wipe
 # the per-user shared-memory segments / memfd symlinks so a re-run starts clean.
