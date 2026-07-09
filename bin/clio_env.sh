@@ -42,24 +42,32 @@ export CLIO_REPO_PATH="$CLIO_BIN"
 # preload lib needs) is preferred over the older system one.
 export LD_LIBRARY_PATH="$CLIO_BIN:$CLIO_CONDA_ENV/lib:${LD_LIBRARY_PATH:-}"
 
-# --- CRITICAL: single consistent clio-core build (fixes #697 crash) ----------
+# --- CRITICAL: single consistent clio-core build (fixes #697 + #714) ---------
 # The `iowarp` conda env also ships a full iowarp-core (libclio_*.so) built from
-# an OLDER commit. The build-tree libs carry an RPATH into the conda prefix, so
-# despite LD_LIBRARY_PATH the loader picks conda's libclio_run_cxx / client libs
-# — while the interceptor carries this build's inlined header code. Mixing two
-# builds gives a mismatched IpcManager ABI: the client reads zmq_transport_ at
-# the wrong offset -> spurious null -> SIGSEGV in ctp::lbm::Transport::Send
-# (issue #697). Force EVERY clio component (daemon + client + interceptor) onto
-# THIS build's libs by preloading them. CLIO_PRELOAD must be prepended to
-# LD_PRELOAD for both `clio_run` and the application.
+# an OLDER commit. The build-tree libs carry a DT_RPATH into the conda prefix
+# (conda FIRST), and DT_RPATH is searched BEFORE LD_LIBRARY_PATH — so the loader
+# picks conda's OLDER libclio_run_cxx / client libs for any lib not force-loaded.
+# Mixing two builds gives:
+#   * a mismatched IpcManager ABI (client reads zmq_transport_ at the wrong
+#     offset -> null -> SIGSEGV in ctp::lbm::Transport::Send) — issue #697; and
+#   * a mismatched Task/PoolQuery wire layout, so a shorter-layout ClientConnect
+#     handshake makes the receiving daemon read past the archive end during
+#     deserialization -> std::terminate -> daemon Abort; when that abort races a
+#     cross-node CFS GetBlob the read returns 0 bytes — the "cross-node blob
+#     data gap" of issue #714 (blob routing itself is correct).
+#
+# PRIMARY fix: bin/clio_fix_rpath.sh rewrites DT_RPATH to build-bin-FIRST on
+# every clio object + clio_run + interceptor, so no stale conda clio lib can
+# ever load (run it once per build). The preload below is defense-in-depth:
+# force-load EVERY clio lib present in this build (globbed, so nothing — e.g.
+# libclio_cee_api / libclio_MOD_NAME_* — is ever missed by a hand-kept list).
 CLIO_PRELOAD=""
-for _l in libclio_run_cxx.so.1 libclio_ctp_host.so \
-          libclio_admin_client.so libclio_admin_runtime.so \
-          libclio_bdev_client.so libclio_bdev_runtime.so \
-          libclio_cte_core_client.so libclio_cte_core_runtime.so \
-          libclio_cte_filesystem_client.so libclio_cte_filesystem_runtime.so \
-          libclio_cae_core_client.so libclio_cae_core_runtime.so; do
-    [ -e "$CLIO_BIN/$_l" ] && CLIO_PRELOAD="$CLIO_PRELOAD$CLIO_BIN/$_l "
+# Prefer versioned soname when present (run_cxx, cee_api), else the plain .so.
+for _so in "$CLIO_BIN"/libclio_*.so; do
+    [ -e "$_so" ] || continue
+    case "$_so" in *libclio_cte_posix.so) continue ;; esac  # interceptor: loaded via CLIO_POSIX_LIB
+    if [ -e "$_so.1" ]; then _so="$_so.1"; fi
+    CLIO_PRELOAD="$CLIO_PRELOAD$_so "
 done
 export CLIO_PRELOAD
 
